@@ -15,8 +15,27 @@ find_package(std_srvs REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+
+# ---------------------------------------------------------------------------------------
+# 2. 新增：针对第三方目录下的 Pangolin 进行路径配置
+# ---------------------------------------------------------------------------------------
+# 定义 Pangolin 编译产出的绝对路径
+set(PANGOLIN_LIB_DIR "${PROJECT_SOURCE_DIR}/thirdparty/build")
+
+# 告诉链接器编译时去这里找库
+link_directories(${PANGOLIN_LIB_DIR})
+
+# 关键：设置 RPATH（运行路径），解决运行时找不到 .so 的问题
+# 这会将该路径写入到生成的二进制文件中
+set(CMAKE_INSTALL_RPATH "${PANGOLIN_LIB_DIR}")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+
+# ---------------------------------------------------------------------------------------
 
 # OMP
 find_package(OpenMP)

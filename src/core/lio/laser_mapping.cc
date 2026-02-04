@@ -43,6 +43,10 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         fasterlio::NUM_MAX_ITERATIONS = yaml["fasterlio"]["max_iteration"].as<int>();
         fasterlio::ESTI_PLANE_THRESHOLD = yaml["fasterlio"]["esti_plane_threshold"].as<float>();
 
+        options_.is_in_slam_mode_ = yaml["fasterlio"]["is_in_slam_mode"].as<bool>();
+        options_.kf_dis_th_ = yaml["fasterlio"]["kf_dis_th"].as<double>();
+        options_.kf_angle_th_ = yaml["fasterlio"]["kf_angle_th"].as<double>();
+
         filter_size_scan = yaml["fasterlio"]["filter_size_scan"].as<float>();
         filter_size_map_min_ = yaml["fasterlio"]["filter_size_map"].as<float>();
         keep_first_imu_estimation_ = yaml["fasterlio"]["keep_first_imu_estimation"].as<bool>();
@@ -152,6 +156,7 @@ bool LaserMapping::Run() {
     }
 
     /// IMU process, kf prediction, undistortion
+    // 这里对点云进行去畸变处理
     p_imu_->Process(measures_, kf_, scan_undistort_);
 
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
@@ -255,9 +260,16 @@ bool LaserMapping::Run() {
         SE3 last_pose = last_kf_->GetLIOPose();
         SE3 cur_pose = state_point_.GetPose();
         if ((last_pose.translation() - cur_pose.translation()).norm() > options_.kf_dis_th_ ||
-            (last_pose.so3().inverse() * cur_pose.so3()).log().norm() > options_.kf_angle_th_) {
+            (last_pose.so3().inverse() * cur_pose.so3()).log().norm() > options_.kf_angle_th_ * M_PI / 180.0 ||
+            (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > 10.0
+            ) {
+            LOG(INFO) << "distance from last kf: "
+                      << (last_pose.translation() - cur_pose.translation()).norm()
+                      << ", angle: "
+                      << (last_pose.so3().inverse() * cur_pose.so3()).log().norm() * 180.0 / M_PI
+                      << ", time: " << (state_point_.timestamp_ - last_kf_->GetState().timestamp_);
             MakeKF();
-        } else if (!options_.is_in_slam_mode_ && (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > 2.0) {
+        } else if (!options_.is_in_slam_mode_ && (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > 10.0) {
             MakeKF();
         }
     }

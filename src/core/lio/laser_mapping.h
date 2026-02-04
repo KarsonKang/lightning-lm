@@ -33,11 +33,11 @@ class LaserMapping {
     struct Options {
         Options() {}
 
-        bool is_in_slam_mode_ = true;  // 是否在slam模式下
+        bool is_in_slam_mode_ = false;  // 是否在slam模式下
 
         /// 关键帧阈值
-        double kf_dis_th_ = 2.0;
-        double kf_angle_th_ = 15 * M_PI / 180.0;
+        double kf_dis_th_ = 5.0;
+        double kf_angle_th_ = 90 * M_PI / 180.0;
     };
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW

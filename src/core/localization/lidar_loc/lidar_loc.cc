@@ -24,18 +24,18 @@ LidarLoc::LidarLoc(LidarLoc::Options options) : options_(options) {
     pcl_ndt_->setResolution(1.0);
     pcl_ndt_->setNeighborhoodSearchMethod(pclomp::DIRECT7);
     pcl_ndt_->setStepSize(0.1);
-    pcl_ndt_->setMaximumIterations(4);
+    pcl_ndt_->setMaximumIterations(10);
     pcl_ndt_->setNumThreads(4);
 
     pcl_ndt_rough_.reset(new NDTType());
     pcl_ndt_rough_->setResolution(5.0);
     pcl_ndt_rough_->setNeighborhoodSearchMethod(pclomp::DIRECT7);
     pcl_ndt_rough_->setStepSize(0.1);
-    pcl_ndt_rough_->setMaximumIterations(4);
+    pcl_ndt_rough_->setMaximumIterations(10);
     pcl_ndt_rough_->setNumThreads(4);
 
     pcl_icp_.reset(new ICPType());
-    pcl_icp_->setMaximumIterations(4);
+    pcl_icp_->setMaximumIterations(10);
     pcl_icp_->setTransformationEpsilon(0.01);
 
     LOG(INFO) << "match name is NDT_OMP"
@@ -567,7 +567,7 @@ void LidarLoc::Align(const CloudPtr& input) {
         LOG(INFO) << "trying dr pose: " << guess_from_dr.translation().transpose() << ", "
                   << (guess_from_dr.so3().inverse() * guess_from_lo.so3()).log().norm()
                   << ", vel_norm: " << current_vel_b_.norm();
-        try_dr = true;
+        try_dr = true;  
     }
 
     bool try_self = false;

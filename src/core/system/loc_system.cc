@@ -40,9 +40,16 @@ bool LocSystem::Init(const std::string &yaml_path) {
         imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
             IMUPtr imu = std::make_shared<IMU>();
             imu->timestamp = ToSec(msg->header.stamp);
-            imu->linear_acceleration =
-                Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-            imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+            // imu->linear_acceleration =
+            //     Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+            // imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+
+            imu->angular_velocity.x() = msg->angular_velocity.x;
+            imu->angular_velocity.y() = msg->angular_velocity.y;
+            imu->angular_velocity.z() = msg->angular_velocity.z;
+            imu->linear_acceleration.x() = msg->linear_acceleration.x * 9.80665;
+            imu->linear_acceleration.y() = msg->linear_acceleration.y * 9.80665;
+            imu->linear_acceleration.z() = msg->linear_acceleration.z * 9.80665;
 
             ProcessIMU(imu);
         });
