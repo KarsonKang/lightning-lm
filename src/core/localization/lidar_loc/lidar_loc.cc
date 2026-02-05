@@ -21,9 +21,9 @@ namespace lightning::loc {
 
 LidarLoc::LidarLoc(LidarLoc::Options options) : options_(options) {
     pcl_ndt_.reset(new NDTType());
-    pcl_ndt_->setResolution(1.0);
+    pcl_ndt_->setResolution(2.0);
     pcl_ndt_->setNeighborhoodSearchMethod(pclomp::DIRECT7);
-    pcl_ndt_->setStepSize(0.1);
+    pcl_ndt_->setStepSize(0.2);
     pcl_ndt_->setMaximumIterations(10);
     pcl_ndt_->setNumThreads(4);
 
