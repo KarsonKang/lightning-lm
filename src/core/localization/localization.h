@@ -76,11 +76,15 @@ class Localization {
     void LidarLocProcCloud(CloudPtr);
 
     using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
+    using PointCloudCallback = std::function<void(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_ptr)>;
+
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
 
     void SetTFCallback(TFCallback&& callback);
+
+    void SetPointCloudCallback(PointCloudCallback&& callback);
 
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -118,6 +122,8 @@ class Localization {
 
     /// 框架相关
     TFCallback tf_callback_;
+    PointCloudCallback pointcloud_callback_;
+
     LocStateCallback loc_state_callback_;
     PointcloudBodyCallback pointcloud_body_callback_;
     PointcloudWorldCallback pointcloud_world_callback_;

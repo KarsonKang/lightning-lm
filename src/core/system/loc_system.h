@@ -26,6 +26,7 @@ class LocSystem {
    public:
     struct Options {
         bool pub_tf_ = true;  // 是否发布tf
+        bool pub_pointcloud_ = true;  // 是否发布点云数据
     };
 
     explicit LocSystem(Options options);
@@ -58,6 +59,7 @@ class LocSystem {
     /// 实时模式下的ros2 node, subscribers
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_ = nullptr;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_ = nullptr;
 
     std::string imu_topic_;
     std::string cloud_topic_;

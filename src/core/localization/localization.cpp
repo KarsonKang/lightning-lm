@@ -156,6 +156,14 @@ void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg:
     preprocess_->Process(cloud, laser_cloud);
     laser_cloud->header.stamp = cloud->header.stamp.sec * 1e9 + cloud->header.stamp.nanosec;
 
+    if(pointcloud_callback_) {
+        auto cloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
+        pcl::toROSMsg(*laser_cloud, *cloud_msg);
+        cloud_msg->header.stamp = cloud->header.stamp;
+        cloud_msg->header.frame_id = "base_link";
+        pointcloud_callback_(cloud_msg);
+    }
+
     if (options_.online_mode_) {
         lidar_odom_proc_cloud_.AddMessage(laser_cloud);
     } else {
@@ -326,5 +334,7 @@ void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vec
 }
 
 void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
+
+void Localization::SetPointCloudCallback(Localization::PointCloudCallback&& callback) { pointcloud_callback_ = callback; }
 
 }  // namespace lightning::loc

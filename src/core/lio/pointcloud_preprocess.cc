@@ -30,13 +30,15 @@ void PointCloudPreprocess::Process(const sensor_msgs::msg::PointCloud2 ::SharedP
 
 void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg,
                                    PointCloudType::Ptr &pcl_out) {
-    cloud_out_.clear();
+    // cloud_out_.clear();
     cloud_full_.clear();
+    pcl_out->clear();
 
     int plsize = msg->point_num;
 
-    cloud_out_.reserve(plsize);
+    // cloud_out_.reserve(plsize);
     cloud_full_.resize(plsize);
+    pcl_out->reserve(plsize);
 
     std::vector<bool> is_valid_pt(plsize, false);
     std::vector<uint> index(plsize - 1);
@@ -70,14 +72,14 @@ void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::Shar
 
     for (uint i = 1; i < plsize; i++) {
         if (is_valid_pt[i]) {
-            cloud_out_.points.push_back(cloud_full_[i]);
+            pcl_out->points.push_back(cloud_full_[i]);
         }
     }
 
-    cloud_out_.width = cloud_out_.size();
-    cloud_out_.height = 1;
-    cloud_out_.is_dense = false;
-    *pcl_out = cloud_out_;
+    pcl_out->width = pcl_out->points.size();
+    pcl_out->height = 1;
+    pcl_out->is_dense = false;
+    // *pcl_out = cloud_out_;
 }
 
 void PointCloudPreprocess::Oust64Handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {

@@ -69,6 +69,15 @@ bool LocSystem::Init(const std::string &yaml_path) {
         loc_->SetTFCallback(
             [this](const geometry_msgs::msg::TransformStamped &pose) { tf_broadcaster_->sendTransform(pose); });
     }
+    if(options_.pub_pointcloud_) {
+        pointcloud_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("/localization/pointcloud2", 10);
+        loc_->SetPointCloudCallback(
+            [this](const sensor_msgs::msg::PointCloud2::SharedPtr cloud_ptr) {
+                if(rclcpp::ok() && cloud_ptr) {
+                    pointcloud_pub_->publish(*cloud_ptr);
+                }
+            });
+    }
 
     bool ret = loc_->Init(yaml_path, map_path);
     if (ret) {
