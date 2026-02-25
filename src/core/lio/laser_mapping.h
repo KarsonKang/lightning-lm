@@ -38,6 +38,7 @@ class LaserMapping {
         /// 关键帧阈值
         double kf_dis_th_ = 5.0;
         double kf_angle_th_ = 90 * M_PI / 180.0;
+        double kf_time_th_ = 2.0;
     };
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW

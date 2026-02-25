@@ -38,6 +38,7 @@ fasterlio:
   is_in_slam_mode : false  # 是否在slam模式下
   kf_dis_th : 5.0         # 关键帧距离阈
   kf_angle_th : 180.0      # 关键帧角度阈（度）
+  kf_time_th : 2.0         # 关键帧时间阈（秒）
 
 
 g2p5:

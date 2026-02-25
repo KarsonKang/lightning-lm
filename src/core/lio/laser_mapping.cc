@@ -46,6 +46,7 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         options_.is_in_slam_mode_ = yaml["fasterlio"]["is_in_slam_mode"].as<bool>();
         options_.kf_dis_th_ = yaml["fasterlio"]["kf_dis_th"].as<double>();
         options_.kf_angle_th_ = yaml["fasterlio"]["kf_angle_th"].as<double>();
+        options_.kf_time_th_ = yaml["fasterlio"]["kf_time_th"].as<double>();
 
         filter_size_scan = yaml["fasterlio"]["filter_size_scan"].as<float>();
         filter_size_map_min_ = yaml["fasterlio"]["filter_size_map"].as<float>();
@@ -269,7 +270,7 @@ bool LaserMapping::Run() {
                       << ", angle: "
                       << (last_pose.so3().inverse() * cur_pose.so3()).log().norm() * 180.0 / M_PI;
             MakeKF();
-        } else if (!options_.is_in_slam_mode_ && (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > 5.0) {
+        } else if (!options_.is_in_slam_mode_ && (state_point_.timestamp_ - last_kf_->GetState().timestamp_) > options_.kf_time_th_) {
             LOG(INFO) << "time from last kf: " << (state_point_.timestamp_ - last_kf_->GetState().timestamp_);
             MakeKF();
         }
