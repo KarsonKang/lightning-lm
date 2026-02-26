@@ -101,6 +101,26 @@ target_link_libraries(static_tf_broadcaster
         ${third_party_libs}
 )
 
+# ------- globalmap_server -------
+find_package(PCL REQUIRED COMPONENTS common io filters)
+find_package(pcl_conversions REQUIRED)
 
-install(TARGETS static_tf_broadcaster tf_transformer run_slam_offline run_slam_online run_loc_offline run_loc_online
+add_executable(globalmap_server
+        globalmap_server.cc
+)
+
+ament_target_dependencies(globalmap_server
+        rclcpp
+        sensor_msgs
+        std_msgs
+        pcl_conversions
+)
+
+target_link_libraries(globalmap_server
+        ${PROJECT_NAME}.libs
+        ${PCL_LIBRARIES}
+        ${third_party_libs}
+)
+
+install(TARGETS globalmap_server static_tf_broadcaster tf_transformer run_slam_offline run_slam_online run_loc_offline run_loc_online
         DESTINATION lib/${PROJECT_NAME})

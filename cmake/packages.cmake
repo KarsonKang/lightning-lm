@@ -44,12 +44,25 @@ if (OPENMP_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 endif ()
 
-if (BUILD_WITH_MARCH_NATIVE)
-    add_compile_options(-march=native)
-else ()
+# 检查硬件架构
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "amd64")
+    # --- x86 架构优化 ---
     add_definitions(-msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
+
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+    # --- ARM 架构优化 (针对 Cortex-A78AE) ---
+    message(STATUS "Detected ARM Architecture - Applying Cortex-A78AE optimizations")
+    
+    add_compile_options(
+        -O3
+        -mcpu=cortex-a78ae
+        -march=armv8.2-a+fp16+rcpc+dotprod+crypto
+    )
+else ()
+    message(WARNING "Unknown architecture ${CMAKE_SYSTEM_PROCESSOR} - No specific optimizations applied")
 endif ()
+
 
 include_directories(
         ${OpenCV_INCLUDE_DIRS}
