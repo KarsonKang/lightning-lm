@@ -214,6 +214,14 @@ Lightning-LM特性：
 
 ## 更新
 
+### 2026.3.31
+
+- LaserMapping部分加上了点到点ICP误差,点到点的部分也使用多线程加速
+- ESKF部分加上了速度clip和dv的缩放（限制某些场景下速度变化太快）
+- 针对云深处的几个数据集和github issues里的数据集做了调参
+- 调整了ESKF的接口以适应点到点ICP的情况（因为点到点ICP与点面ICP的维度不同）
+- 添加了一些Kalman filter里的tricks: 对P阵做对称化，保护最小值等 
+
 ### 2026.3.20
 
 - MapIncremental在关键帧层面调用，增强LIO的鲁棒性（VBR数据集上不飘移）
@@ -377,6 +385,20 @@ imu和雷达外参默认为零就好，我们对这个不敏感。
 - [done] 检查栅格地图的分辨率取值是否正常
 - 强制2D输出
 - 额外便利性功能（打开关闭定位，重新初始化，指定位置等）
+
+### 测试情况
+
+1. 建图
+
+- NCLT: pass
+- VBR: pass
+- Livox Multi Floor: pass
+- github: https://github.com/gaoxiang12/lightning-lm/issues/75#issuecomment-4131131883 pass 需要关掉IMU filter
+- geely: pass
+- yunshenchu
+  - building1 pass
+
+2. 定位
 
 ## 其他
 

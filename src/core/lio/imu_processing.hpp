@@ -39,6 +39,7 @@ class ImuProcess {
     void Process(const MeasureGroup &meas, ESKF &kf_state, CloudPtr &scan);
 
     bool IsIMUInited() const { return imu_need_init_ == false; }
+    void SetUseIMUFilter(bool b) { use_imu_filter_ = b; }
 
     double GetMeanAccNorm() const { return mean_acc_.norm(); }
 
@@ -73,6 +74,7 @@ class ImuProcess {
     bool b_first_frame_ = true;
     bool imu_need_init_ = true;
 
+    bool use_imu_filter_ = true;
     IMUFilter filter_;
 };
 
@@ -167,6 +169,8 @@ inline void ImuProcess::IMUInit(const MeasureGroup &meas, ESKF &kf_state, int &N
     init_P(21, 21) = init_P(22, 22) = 0.00001;
     kf_state.ChangeP(init_P);
 
+    LOG(INFO) << "P diag: " << init_P.diagonal().transpose();
+
     last_imu_ = meas.imu_.back();
 }
 
@@ -192,9 +196,11 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
     Vec3d acc = Vec3d::Zero();
     Vec3d gyro = Vec3d::Zero();
 
-    for (auto &imu : v_imu) {
-        auto imu_f = filter_.Filter(*imu);
-        *imu = imu_f;
+    if (use_imu_filter_) {
+        for (auto &imu : v_imu) {
+            auto imu_f = filter_.Filter(*imu);
+            *imu = imu_f;
+        }
     }
 
     for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++) {
@@ -332,7 +338,9 @@ inline void ImuProcess::Process(const MeasureGroup &meas, ESKF &kf_state, CloudP
 
             cov_acc_ = cov_acc_scale_;
             cov_gyr_ = cov_gyr_scale_;
-            LOG(INFO) << "imu init done, bg: " << imu_state.bg_.transpose() << ", ba: " << imu_state.ba_.transpose();
+            LOG(INFO) << "imu init done, bg: " << imu_state.bg_.transpose() << ", ba: " << imu_state.ba_.transpose()
+                      << ", grav: " << imu_state.grav_.vec_.transpose() << ", mean: " << mean_acc_.transpose() << ", "
+                      << mean_gyr_.transpose();
         } else {
             LOG(INFO) << "waiting for imu init ... " << init_iter_num_;
         }

@@ -135,6 +135,7 @@ class PangolinWindowImpl {
 
     // text
     pangolin::GlText gltext_label_global_;
+    pangolin::GlText gltext_label_state_;
 
     // camera
     pangolin::OpenGlRenderState s_cam_main_;
@@ -155,11 +156,13 @@ class PangolinWindowImpl {
     // 滤波器状态相关 Data logger object
     pangolin::DataLog log_vel_;           // odom frame下的速度
     pangolin::DataLog log_vel_baselink_;  // baselink frame下的速度
+    pangolin::DataLog log_bias_acc_;      // accelerometer bias
     pangolin::DataLog log_confidence_;    // confidence
     pangolin::DataLog log_error_;         // 误差
 
     std::unique_ptr<pangolin::Plotter> plotter_vel_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_vel_baselink_ = nullptr;
+    std::unique_ptr<pangolin::Plotter> plotter_bias_acc_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_confidence_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_err_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_err_eval_ = nullptr;

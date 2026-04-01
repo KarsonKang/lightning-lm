@@ -49,27 +49,34 @@ void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::Shar
     }
 
     std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const uint &i) {
-        if ((msg->points[i].line < num_scans_) &&
-            ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00)) {
-            if (i % point_filter_num_ == 0) {
-                cloud_full_[i].x = msg->points[i].x;
-                cloud_full_[i].y = msg->points[i].y;
-                cloud_full_[i].z = msg->points[i].z;
-                cloud_full_[i].intensity = msg->points[i].reflectivity;
-
-                // use curvature as time of each laser points, curvature unit: ms
-                cloud_full_[i].time = msg->points[i].offset_time / double(1000000);
-
-                if ((abs(cloud_full_[i].x - cloud_full_[i - 1].x) > 1e-7) ||
-                    (abs(cloud_full_[i].y - cloud_full_[i - 1].y) > 1e-7) ||
-                    (abs(cloud_full_[i].z - cloud_full_[i - 1].z) > 1e-7) &&
-                        (cloud_full_[i].x * cloud_full_[i].x + cloud_full_[i].y * cloud_full_[i].y +
-                             cloud_full_[i].z * cloud_full_[i].z >
-                         (blind_ * blind_))) {
-                    is_valid_pt[i] = 1;
-                }
-            }
+        // if ((msg->points[i].line < num_scans_) &&
+        // ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00)) {
+        if (i % point_filter_num_ != 0) {
+            return;
         }
+
+        cloud_full_[i].x = msg->points[i].x;
+        cloud_full_[i].y = msg->points[i].y;
+        cloud_full_[i].z = msg->points[i].z;
+        cloud_full_[i].intensity = msg->points[i].reflectivity;
+
+        // use curvature as time of each laser points, curvature unit: ms
+        cloud_full_[i].time = msg->points[i].offset_time / double(1000000);
+
+        if (cloud_full_[i].z < height_min_ || cloud_full_[i].z > height_max_) {
+            return;
+        }
+
+        if ((abs(cloud_full_[i].x - cloud_full_[i - 1].x) > 1e-7) ||
+            (abs(cloud_full_[i].y - cloud_full_[i - 1].y) > 1e-7) ||
+            (abs(cloud_full_[i].z - cloud_full_[i - 1].z) > 1e-7) &&
+                (cloud_full_[i].x * cloud_full_[i].x + cloud_full_[i].y * cloud_full_[i].y +
+                     cloud_full_[i].z * cloud_full_[i].z >
+                 (blind_ * blind_))) {
+            is_valid_pt[i] = 1;
+        }
+
+        // }
     });
 
     for (uint i = 1; i < plsize; i++) {

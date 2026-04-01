@@ -1,9 +1,9 @@
 # 针对NCLT的配置
 common:
   dataset: "nclt"
-  lidar_topic: "/livox/lidar_192_168_1_163"
+  lidar_topic: "points_raw"
   livox_lidar_topic: "/livox/lidar"
-  imu_topic: "/livox/imu_192_168_1_163"
+  imu_topic: "imu_raw"
 
 # fasterlio 参数
 fasterlio:
@@ -34,8 +34,12 @@ fasterlio:
                  0, 1, 0,
                  0, 0, 1 ]
   keep_first_imu_estimation: false
-  kf_dis_th: 1.0
+  kf_dis_th: 2.0
   kf_angle_th: 5.0
+
+  enable_icp_part: true
+  kalman_R: 0.1
+  min_pts: 300
 
 
 g2p5:
@@ -64,7 +68,7 @@ system:
 loop_closing:
   loop_kf_gap: 20       # 每隔多少个关键帧检查一次
   min_id_interval: 20   # 被检查的关键帧ID间隔
-  closest_id_th: 20     # 历史关键帧与当前帧的ID间隔
+  closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
   max_range: 60.0       # 候选帧的最大距离
   ndt_score_th: 1.0     # ndt位姿分值
   with_height: true

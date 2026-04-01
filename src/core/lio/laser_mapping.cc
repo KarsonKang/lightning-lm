@@ -78,6 +78,13 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
         options_.kf_dis_th_ = yaml["fasterlio"]["kf_dis_th"].as<double>();
         options_.kf_angle_th_ = yaml["fasterlio"]["kf_angle_th"].as<double>() * M_PI / 180.0;
+        options_.enable_icp_part_ = yaml["fasterlio"]["enable_icp_part"].as<bool>();
+        options_.min_pts = yaml["fasterlio"]["min_pts"].as<int>();
+        options_.plane_icp_weight_ = yaml["fasterlio"]["plane_icp_weight"].as<float>();
+
+        bool use_imu_filter = yaml["fasterlio"]["imu_filter"].as<bool>();
+        p_imu_->SetUseIMUFilter(use_imu_filter);
+        options_.proj_kfs_ = yaml["fasterlio"]["proj_kfs"].as<bool>();
 
     } catch (...) {
         LOG(ERROR) << "bad conversion";
@@ -208,6 +215,7 @@ bool LaserMapping::Run() {
         }
     }
 
+    LOG(INFO) << "=============================";
     LOG(INFO) << "LIO get cloud at beg: " << std::setprecision(14) << measures_.lidar_begin_time_
               << ", end: " << measures_.lidar_end_time_;
 
@@ -223,17 +231,21 @@ bool LaserMapping::Run() {
     voxel_scan_.setInputCloud(scan_undistort_);
     voxel_scan_.filter(*scan_down_body_);
 
+    if (options_.proj_kfs_) {
+        ProjectKFs();
+    }
+
     int cur_pts = scan_down_body_->size();
 
-    if (cur_pts < (scan_undistort_->size() * 0.1) || cur_pts < 500) {
+    if (cur_pts < (scan_undistort_->size() * 0.1) || cur_pts < options_.min_pts) {
         /// 降采样太狠了,有效点数不够，用0.1分辨率代替
-        LOG(INFO) << "too few points, using 0.1 resol";
+        // LOG(INFO) << "too few points, using 0.1 resol";
         auto v = voxel_scan_;
         v.setLeafSize(0.1, 0.1, 0.1);
         v.setInputCloud(scan_undistort_);
         v.filter(*scan_down_body_);
 
-        LOG(INFO) << "Now pts: " << scan_down_body_->size() << ", before: " << cur_pts;
+        // LOG(INFO) << "Now pts: " << scan_down_body_->size() << ", before: " << cur_pts;
         cur_pts = scan_down_body_->size();
     }
 
@@ -245,37 +257,39 @@ bool LaserMapping::Run() {
     scan_down_world_->resize(cur_pts);
     nearest_points_.resize(cur_pts);
 
-    /// 尝试在零速和两种情况取更好的
-
     // 成员变量预分配
     residuals_.resize(cur_pts, 0);
     point_selected_surf_.resize(cur_pts, 1);
+    point_selected_icp_.resize(cur_pts, 1);
     plane_coef_.resize(cur_pts, Vec4f::Zero());
 
-    auto old_state = kf_.GetX();
+    auto pred_state = kf_.GetX();
+    // pred_state.pos_ = state_point_.pos_;  // 假定位置不动行不行,防止速度漂移
+    // kf_.ChangeX(pred_state);
 
-    kf_.Update(ESKF::ObsType::LIDAR, 1e-3);
+    kf_.Update(ESKF::ObsType::LIDAR, 1.0);
+
+    auto last_state = state_point_;
     state_point_ = kf_.GetX();
-
-    // if (keep_first_imu_estimation_ && all_keyframes_.size() < 5 &&
-    //     (old_state.rot_.inverse() * state_point_.rot_).log().norm() > 0.3 * M_PI / 180) {
-    //     kf_.ChangeX(old_state);
-    //     state_point_ = old_state;
-
-    //     LOG(INFO) << "set state as prediction";
-    // }
-
-    // SE3 delta = old_state.GetPose().inverse() * state_point_.GetPose();
-    // LOG(INFO) << "delta norm: " << delta.translation().norm() << ", " << delta.so3().log().norm() * 180 /
-    // M_PI;
-
-    // LOG(INFO) << "state vel: " << state_point_.vel_.transpose();
-
     state_point_.timestamp_ = measures_.lidar_end_time_;
 
     LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " down " << cur_pts
               << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_surf_ << ", "
               << effect_feat_icp_;
+    LOG(INFO) << "delta trans: " << (pred_state.pos_ - state_point_.pos_).transpose()
+              << ", ang: " << (pred_state.rot_.inverse() * state_point_.rot_).log().norm() * 180 / M_PI;
+    LOG(INFO) << "P diag: " << kf_.GetP().diagonal().transpose();
+
+    LOG(INFO) << "delta v: " << (pred_state.vel_ - state_point_.vel_).norm();
+
+    Vec3d v_from_last = (state_point_.pos_ - last_state.pos_) / (state_point_.timestamp_ - last_state.timestamp_);
+    LOG(INFO) << "v from last: " << v_from_last.transpose();
+
+    if ((pred_state.vel_ - state_point_.vel_).norm() > 1.0 || state_point_.vel_.norm() > 4.0) {
+        LOG(ERROR) << "detected very large vel change, last: " << last_state.vel_.transpose()
+                   << ", pred: " << pred_state.vel_.transpose() << ", cur:" << state_point_.vel_.transpose();
+        LOG(ERROR) << "please check";
+    }
 
     /// keyframes
     if (last_kf_ == nullptr) {
@@ -305,7 +319,7 @@ bool LaserMapping::Run() {
     }
 
     if (ui_) {
-        ui_->UpdateScan(scan_undistort_, state_point_.GetPose());
+        ui_->UpdateScan(scan_down_body_, state_point_.GetPose());
     }
 
     // cv::Mat image(500, 500, CV_8UC3, cv::Scalar(0, 0, 0));
@@ -315,20 +329,50 @@ bool LaserMapping::Run() {
     // cv::waitKey(0);
 
     // static int scan_idx = 0;
-    // LOG(INFO) << "scan: " << scan_idx << ", state: " << state_point_.pos_.transpose() << ", yaw "
-    //           << state_point_.rot_.angleZ<double>() * 180 / M_PI;
+    LOG(INFO) << "state: " << state_point_.pos_.transpose() << ", yaw "
+              << state_point_.rot_.angleZ<double>() * 180 / M_PI << ", vel: " << state_point_.vel_.transpose()
+              << " ba: " << state_point_.ba_.transpose() << ", grav: " << state_point_.grav_.vec_.transpose()
+              << ", grav norm: " << state_point_.grav_.vec_.norm();
     // scan_idx++;
 
     return true;
+}
+
+void LaserMapping::ProjectKFs() {
+    auto state = kf_.GetX();
+    SE3 pose_cur(state.rot_, state.pos_);
+    pose_cur = pose_cur.inverse();
+
+    for (auto kf : proj_kfs_) {
+        // if (last_kf_) {
+        // auto kf = last_kf_;
+        SE3 pose = pose_cur * kf->GetLIOPose();
+
+        int cnt = 0;
+        for (auto &pt : kf->GetCloud()->points) {
+            Vec3d p = pose * ToVec3d(pt);
+            PointType pcl_pt;
+
+            pcl_pt.x = p.x();
+            pcl_pt.y = p.y();
+            pcl_pt.z = p.z();
+            pcl_pt.intensity = pt.intensity;
+
+            scan_down_body_->push_back(pcl_pt);
+            cnt++;
+
+            if (cnt > 300) {
+                break;
+            }
+        }
+        // }
+    }
 }
 
 void LaserMapping::MakeKF() {
     Keyframe::Ptr kf = std::make_shared<Keyframe>(kf_id_++, scan_undistort_, state_point_);
 
     if (last_kf_) {
-        // LOG(INFO) << "last kf lio: " << last_kf_->GetLIOPose().translation().transpose()
-        //           << ", opt: " << last_kf_->GetOptPose().translation().transpose();
-
         /// opt pose 用之前的递推
         SE3 delta = last_kf_->GetLIOPose().inverse() * kf->GetLIOPose();
         kf->SetOptPose(last_kf_->GetOptPose() * delta);
@@ -351,6 +395,26 @@ void LaserMapping::MakeKF() {
 
     // 有keyframes时更新local map
     Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
+
+    /// 更新project kfs
+    if (proj_kfs_.size() >= options_.max_proj_kfs_) {
+        auto last = proj_kfs_.back();
+
+        SE3 delta = last->GetLIOPose().inverse() * kf->GetLIOPose();
+
+        if (delta.translation().norm() < 3 || delta.so3().log().norm() < 20 / 180 * M_PI) {
+            // proj_kfs_.pop_back();
+        } else {
+            proj_kfs_.pop_front();
+            proj_kfs_.emplace_back(kf);
+        }
+    } else {
+        proj_kfs_.emplace_back(kf);
+    }
+
+    // for (auto &kf : proj_kfs_) {
+    //     LOG(INFO) << "proj kf: " << kf->GetID();
+    // }
 }
 
 void LaserMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
@@ -557,12 +621,12 @@ void LaserMapping::MapIncremental() {
 void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     int cnt_pts = scan_down_body_->size();
 
-    point_selected_icp_.resize(cnt_pts);
-
     std::vector<size_t> index(cnt_pts);
     for (size_t i = 0; i < index.size(); ++i) {
         index[i] = i;
     }
+
+    LOG(INFO) << "obs from state: " << s.pos_.transpose() << ", " << s.rot_.unit_quaternion().coeffs().transpose();
 
     Timer::Evaluate(
         [&, this]() {
@@ -582,7 +646,6 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
                 points_near.clear();
 
                 /** Find the closest surfaces in the map **/
-                // if (obs.converge_) {
                 ivox_->GetClosestPoint(point_world, points_near, fasterlio::NUM_MATCH_POINTS);
                 point_selected_surf_[i] = points_near.size() >= fasterlio::MIN_NUM_MATCH_POINTS;
 
@@ -635,13 +698,9 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
 
     if (effect_feat_surf_ < 1 && effect_feat_icp_ < 1) {
         obs.valid_ = false;
-        LOG(WARNING) << "No Effective Points: " << effect_feat_surf_ << "< " << effect_feat_icp_;
+        LOG(WARNING) << "No enough effective points: " << effect_feat_surf_ << ", " << effect_feat_icp_;
         return;
     }
-
-    /*** Computation of Measurement Jacobian matrix H and measurements vector ***/
-    obs.h_x_ = Eigen::MatrixXd::Zero(effect_feat_surf_, 12);  // 23
-    obs.residual_.resize(effect_feat_surf_);
 
     index.resize(effect_feat_surf_);
     const Mat3f off_R = s.offset_R_lidar_.matrix().cast<float>();
@@ -652,7 +711,21 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     obs.HTH_.setZero();
     obs.HTr_.setZero();
 
-    std::for_each(std::execution::seq, index.begin(), index.end(), [&](const size_t &i) {
+    std::vector<Mat12d> JTJ(effect_feat_surf_);
+    std::vector<Vec12d> JTr(effect_feat_surf_);
+
+    std::vector<double> res_sq(index.size());
+
+    auto huber_weight = [](double r, double delta = 0.1) {
+        double a = std::abs(r);
+        if (a <= delta) {
+            return 1.0;
+        } else {
+            return delta / a;
+        }
+    };
+
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
         Vec3f point_this_be = corr_pts_[i].head<3>();
         Mat3f point_be_crossmat = math::SKEW_SYM_MATRIX(point_this_be);
         Vec3f point_this = off_R * point_this_be + off_t;
@@ -670,86 +743,89 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
 
         if (extrinsic_est_en_) {
             Vec3f B(point_be_crossmat * off_R.transpose() * C);
-            //  obs.h_x_.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0], B[1],
-            //  B[2],
-            //      C[0], C[1], C[2];
             J << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2];
-
         } else {
-            // obs.h_x_.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0, 0.0, 0.0,
-            // 0.0,
-            //     0.0, 0.0;
             J << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
         }
 
-        /// 增加了cauchy's robust kernel
         float res = -corr_pts_[i][3];
 
-        // float new_res, jacob_factor;
-        // math::Cauchy(res, new_res, jacob_factor);
+        double w = huber_weight(res);
 
-        // obs.residual_(i) = rho;
-        // obs.h_x_.block<1, 12>(i, 0) = obs.h_x_.block<1, 12>(i, 0).eval() * drho;
-        // J = J * jacob_factor;
+        JTJ[i] = (J.transpose() * J).eval() * w;
+        JTr[i] = J.transpose() * res * w;
 
-        obs.HTH_ += J.transpose() * J;
-        obs.HTr_ += J.transpose() * res;
-
-        // obs.residual_(i) = res;
+        res_sq[i] = res * res;
     });
+
+    for (int i = 0; i < index.size(); ++i) {
+        obs.HTH_ += JTJ[i] * options_.plane_icp_weight_;
+        obs.HTr_ += JTr[i] * options_.plane_icp_weight_;
+    }
+
+    std::sort(res_sq.begin(), res_sq.end());
+    obs.lidar_residual_mean_ = res_sq[res_sq.size() / 2];
+    obs.lidar_residual_max_ = res_sq[res_sq.size() - 1];
+    LOG(INFO) << "residual mean: " << obs.lidar_residual_mean_ << ", max: " << obs.lidar_residual_max_
+              << ", 85%: " << res_sq[res_sq.size() * 0.85];
 
     /// 点到点ICP部分
 
-    std::vector<double> res_sq2, res_sq2_icp;
-    const double v = 0.01;
+    if (options_.enable_icp_part_) {
+        std::vector<double> res_sq2, res_sq2_icp;
 
-    for (int i = 0; i < cnt_pts; ++i) {
-        if (point_selected_icp_[i] == false) {
-            continue;
+        JTJ.resize(cnt_pts);
+        JTr.resize(cnt_pts);
+
+        std::vector<size_t> index(cnt_pts);
+        for (size_t i = 0; i < index.size(); ++i) {
+            index[i] = i;
         }
 
-        /// TODO: 外参
-        Vec3d q = scan_down_body_->points[i].getVector3fMap().cast<double>();
-        Vec3d qs = scan_down_world_->points[i].getVector3fMap().cast<double>();
-
-        Eigen::Matrix<double, 3, 12> J;
-        J.setZero();
-
-        /// translation 部分
-        J.block<3, 3>(0, 0) = Mat3d::Identity();
-
-        /// rotation 部分
-        SO3 R = s.rot_ * s.offset_R_lidar_;
-        J.block<3, 3>(0, 3) = -R.matrix() * SO3::hat(q);
-
-        for (int k = 0; k < nearest_points_[i].size(); ++k) {
-            Vec3d e = qs - nearest_points_[i][k].getVector3fMap().cast<double>();
-
-            if (e.norm() > 0.5) {
-                continue;
+        std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
+            if (point_selected_icp_[i] == false) {
+                return;
             }
 
-            // Vec3d res_c;
-            // float j = 0;
-            // math::Cauchy(e, res_c, j);
+            /// TODO: 外参
+            Vec3d q = scan_down_body_->points[i].getVector3fMap().cast<double>();
+            Vec3d qs = scan_down_world_->points[i].getVector3fMap().cast<double>();
 
-            // J = J * j;
+            Eigen::Matrix<double, 3, 12> J;
+            J.setZero();
 
-            obs.HTH_ += J.transpose() * J * v;
-            obs.HTr_ += -J.transpose() * e * v;
-            res_sq2_icp.emplace_back(e.transpose() * e);
+            /// translation 部分
+            J.block<3, 3>(0, 0) = Mat3d::Identity();
+
+            /// rotation 部分
+            SO3 R = s.rot_ * s.offset_R_lidar_;
+            J.block<3, 3>(0, 3) = -R.matrix() * SO3::hat(q);
+
+            Vec3d e = qs - nearest_points_[i][0].getVector3fMap().cast<double>();
+
+            if (e.norm() > 0.5) {
+                point_selected_icp_[i] = false;
+                return;
+            }
+
+            JTJ[i] = J.transpose() * J;
+            JTr[i] = -J.transpose() * e;
+        });
+
+        for (int i = 0; i < cnt_pts; ++i) {
+            if (point_selected_icp_[i] == false) {
+                continue;
+            }
+            obs.HTH_ += JTJ[i] * options_.icp_weight_;
+            obs.HTr_ += JTr[i] * options_.icp_weight_;
         }
-
-        // size_t old_size = obs.residual_.rows();
-        // obs.residual_.conservativeResize(old_size + 3, 1);
-
-        // for (int k = 0; k < 3; ++k) {
-        //     obs.residual_(old_size + k, 0) = -res[k];
-        // }
-
-        // obs.h_x_.conservativeResize(old_size + 3, obs.h_x_.cols());
-        // obs.h_x_.block<3, 12>(old_size, 0) = jacobian;
     }
+
+    /// 惩罚速度项
+    // Eigen::Matrix<double, 3, 12> J;
+    // J.setZero();
+    // J.block<3, 3>(0, 0) = Mat3d::Identity();
+    // obs.HTH_
 
     /// 填入中位数平方误差
     // for (size_t i = 0; i < cnt_pts; ++i) {

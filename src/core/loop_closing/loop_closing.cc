@@ -152,7 +152,7 @@ void LoopClosing::ComputeLoopCandidates() {
     // 保存成功的候选
     std::vector<LoopCandidate> succ_candidates;
     for (const auto& lc : candidates_) {
-        LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
+        // LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
         if (lc.ndt_score_ > options_.ndt_score_th_) {
             succ_candidates.emplace_back(lc);
         }
@@ -166,7 +166,7 @@ void LoopClosing::ComputeLoopCandidates() {
 }
 
 void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
-    LOG(INFO) << "aligning " << c.idx1_ << " with " << c.idx2_;
+    // LOG(INFO) << "aligning " << c.idx1_ << " with " << c.idx2_;
     const int submap_idx_range = 40;
     auto kf1 = all_keyframes_.at(c.idx1_), kf2 = all_keyframes_.at(c.idx2_);
 
@@ -259,8 +259,6 @@ void LoopClosing::PoseOptimization() {
     kf_vert_.emplace_back(v);
 
     /// 上一个关键帧的运动约束
-    /// TODO 3D激光最好是跟前面多个帧都有关联
-
     for (int i = 1; i < 3; i++) {
         int id = cur_kf_->GetID() - i;
         if (id >= 0) {
@@ -305,9 +303,9 @@ void LoopClosing::PoseOptimization() {
         return;
     }
 
-    // if (candidates_.empty()) {
-    //     return;
-    // }
+    if (candidates_.empty()) {
+        return;
+    }
 
     optimizer_->InitializeOptimization();
     optimizer_->SetVerbose(false);

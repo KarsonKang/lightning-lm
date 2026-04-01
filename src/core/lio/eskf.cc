@@ -4,6 +4,34 @@
 
 #include "core/lio/eskf.hpp"
 
+#include <Eigen/Eigenvalues>
+#include <algorithm>
+
+namespace {
+
+using CovType = lightning::ESKF::CovType;
+
+void SymmetrizeAndFloorCovariance(CovType& P, double min_cov_diag) {
+    P = 0.5 * (P + P.transpose()).eval();
+
+    for (int i = 0; i < P.rows(); ++i) {
+        if (P(i, i) < min_cov_diag) {
+            P(i, i) = min_cov_diag;
+        } else if (P(i, i) > 100.0) {
+            P(i, i) = 100.0;
+        }
+
+        for (int j = 0; j < P.cols(); ++j) {
+            if (std::isnan(P(i, j)) || std::isinf(P(i, j))) {
+                LOG(WARNING) << "find nan or inf in P: " << P(i, j);
+                P(i, j) = 1.0;
+            }
+        }
+    }
+}
+
+}  // namespace
+
 namespace lightning {
 
 void ESKF::Predict(const double& dt, const ESKF::ProcessNoiseType& Q, const Vec3d& gyro, const Vec3d& acce) {
@@ -89,6 +117,8 @@ void ESKF::Predict(const double& dt, const ESKF::ProcessNoiseType& Q, const Vec3
 
     F_x1_ += f_x_final * dt;
     P_ = (F_x1_)*P_ * (F_x1_).transpose() + (dt * f_w_final) * Q * (dt * f_w_final).transpose();
+    P_ *= options_.predict_cov_inflation_;
+    SymmetrizeAndFloorCovariance(P_, options_.min_cov_diag_);
 }
 
 /**
@@ -137,6 +167,12 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
             bias_obs_func_(x_, custom_obs_model_);
         }
 
+        if (custom_obs_model_.valid_ == false) {
+            x_ = last_x;
+            P_ = P_propagated;
+            return;
+        }
+
         if (use_aa_ && i > -1 && (obs == ObsType::LIDAR || obs == ObsType::WHEEL_SPEED_AND_LIDAR) &&
             custom_obs_model_.lidar_residual_mean_ >= last_lidar_res * 1.01) {
             x_ = last_x;
@@ -158,7 +194,6 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
         iterations_ = i + 2;  // i从-1开始计
         final_res_ = custom_obs_model_.lidar_residual_mean_ / init_res;
 
-        int dof_measurement = custom_obs_model_.h_x_.rows();
         StateVecType dx = x_.boxminus(start_x);  // 当前x与起点之间的dx
         dx_current = dx;                         //
 
@@ -204,33 +239,62 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
             }
         }
 
-        /// 处理各类观测模型
-        /// 纯雷达观测
-        double R_inv = 1.0 / (R * dof_measurement);
+        Mat12d HTH = custom_obs_model_.HTH_;
+        Vec12d HTr = custom_obs_model_.HTr_;
+        Mat12d HTH_sym = 0.5 * (HTH + HTH.transpose());
 
-        // HTRH = H^T R^-1 H
-        Eigen::Matrix<double, 12, 12> HTH = custom_obs_model_.HTH_;
+        Eigen::SelfAdjointEigenSolver<Mat12d> eigen_solver(HTH_sym);
+        if (eigen_solver.info() != Eigen::Success) {
+            LOG(WARNING) << "Failed to decompose ESKF observation information matrix.";
+            continue;
+        }
+
+        const Vec12d eigen_values = eigen_solver.eigenvalues();
+        const Mat12d eigen_vectors = eigen_solver.eigenvectors();
+        const double max_eigen_value = std::max(1e-12, eigen_values.maxCoeff());
+        const double degeneracy_threshold = max_eigen_value * options_.degeneracy_threshold_ratio_;
+
+        // LOG(INFO) << "eigen values of HTH: " << eigen_values.transpose();
+
+        Vec12d observable_mask = Vec12d::Zero();
+        int nullity = 0;
+        for (int k = 0; k < observable_mask.size(); ++k) {
+            if (eigen_values(k) > degeneracy_threshold) {
+                observable_mask(k) = 1.0;
+            } else {
+                nullity++;
+            }
+        }
+
+        const Mat12d observable_projector = eigen_vectors * observable_mask.asDiagonal() * eigen_vectors.transpose();
+        const Mat12d HTH_eff = observable_projector * HTH_sym * observable_projector;
+        const Vec12d HTr_eff = observable_projector * HTr;
 
         CovType P_temp = (P_ / R).inverse();  // P阵上面已经更新
-        P_temp.block<12, 12>(0, 0) += HTH;    // Q in (38)
-        CovType Q_inv = P_temp.inverse();     // Q inv
+
+        /// 现在问题是这个权重太大，导致整体过于依赖先验 ...
+        // P_temp.setIdentity();
+
+        P_temp.block<12, 12>(0, 0) += HTH_eff;
+        CovType Q_inv = P_temp.inverse();  // Q inv
 
         // Q*H^T * R^-1 * r = K * r
         // <-- K ----->
-        K_r = Q_inv.template block<23, 12>(0, 0) * custom_obs_model_.HTr_;
+        K_r = Q_inv.template block<23, 12>(0, 0) * HTr_eff;
 
         // K_H = Q^-1 H^T R^-1 H
         //       <--  K     ->
         K_H.setZero();
-        K_H.template block<23, 12>(0, 0) = Q_inv.template block<23, 12>(0, 0) * HTH;
-
-        /// 检查 K_H 的奇异性
-        // Eigen::JacobiSVD<Eigen::MatrixXd> svd(K_H, Eigen::ComputeThinU | Eigen::ComputeThinV);
-        // auto singular = svd.singularValues();
-        // double singular_th = singular(0, 0) / singular(1, 0);
-        // LOG(INFO) << "singular check: " << singular_th << ", " << singular(0, 0) << ", " << singular(1, 0);
+        K_H.template block<23, 12>(0, 0) = Q_inv.template block<23, 12>(0, 0) * HTH_eff;
 
         // dx = Kr + (KH-I) dx
+        // LOG(INFO) << "K_r: " << K_r.transpose()
+        //           << ", prior: " << ((K_H - Eigen::Matrix<double, 23, 23>::Identity()) * dx_current).transpose();
+
+        // dx_current.block<3, 1>(18, 0).setZero();
+        // K_r.block<3, 1>(18, 0).setZero();
+        // K_H.block<3, 12>(18, 0).setZero();
+
         dx_current = K_r + (K_H - Eigen::Matrix<double, 23, 23>::Identity()) * dx_current;
 
         // check nan
@@ -240,7 +304,17 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
             }
         }
 
-        // LOG(INFO) << "iter " << iterations_ << ", dx: " << dx_current.transpose();
+        // Vec3d dv = dx_current.middleRows(12, 3);
+        // if (dv.norm() > options_.vel_clip_norm_) {
+        //     dv = dv / dv.norm() * options_.vel_clip_norm_;
+        // }
+
+        // dv = dv * options_.dv_ratio_;
+        // dx_current.middleRows(12, 3) = dv;
+
+        // dx_current.middleRows(18, 5).setZero();
+
+        LOG(INFO) << "iter " << iterations_ << ", dx: " << dx_current.transpose();
 
         if (!use_aa_) {
             x_ = x_.boxplus(dx_current);
@@ -335,9 +409,20 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
 
             P_ = L_ - K_H.block<23, 12>(0, 0) * P_.template block<12, 23>(0, 0);
 
+            if (nullity > 0) {
+                // LOG_EVERY_N(INFO, 50) << "ESKF observation degeneracy rank " << (12 - nullity) << "/12";
+                P_.block<12, 12>(0, 0) *= options_.degeneracy_cov_inflation_;
+            }
+
+            // SymmetrizeAndFloorCovariance(P_, options_.min_cov_diag_);
+
             break;
         }
     }
+
+    SymmetrizeAndFloorCovariance(P_, options_.min_cov_diag_);
+
+    // P_.block<3, 3>(18, 18) = P_propagated.block<3, 3>(18, 18);
 }
 
 }  // namespace lightning

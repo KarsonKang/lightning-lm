@@ -35,9 +35,18 @@ class LaserMapping {
 
         bool is_in_slam_mode_ = true;  // 是否在slam模式下
 
+        bool enable_icp_part_ = true;    // 是否添加ICP部分
+        double plane_icp_weight_ = 1.0;  // 点面ICP部分的权重
+        double icp_weight_ = 100;        // ICP部分的权重
+
+        int min_pts = 300;  // 配准所需的点数
+
         /// 关键帧阈值
         double kf_dis_th_ = 2.0;
         double kf_angle_th_ = 15 * M_PI / 180.0;
+
+        bool proj_kfs_ = false;
+        int max_proj_kfs_ = 2;
     };
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -129,6 +138,9 @@ class LaserMapping {
     /// 创建关键帧
     void MakeKF();
 
+    /// 将附近的关键帧投影至scan_down_body中
+    void ProjectKFs();
+
    private:
     Options options_;
 
@@ -207,6 +219,8 @@ class LaserMapping {
 
     bool extrinsic_est_en_ = true;
     bool use_aa_ = false;  // use anderson acceleration?
+
+    std::list<Keyframe::Ptr> proj_kfs_;  // 投影到当前帧的关键帧
 
     std::shared_ptr<ui::PangolinWindow> ui_ = nullptr;
 };

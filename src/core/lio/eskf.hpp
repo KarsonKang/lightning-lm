@@ -74,6 +74,15 @@ class ESKF {
         int max_iterations_ = 4;
         StateVecType epsi_;    // 收敛条件
         bool use_aa_ = false;  // use anderson accleration
+
+        /// 速度clip
+        double vel_clip_norm_ = 1.0;
+        double dv_ratio_ = 0.5;
+
+        double predict_cov_inflation_ = 1.01;
+        double min_cov_diag_ = 1e-9;
+        double degeneracy_threshold_ratio_ = 1e-3;
+        double degeneracy_cov_inflation_ = 1.02;
     };
 
     /// 初始化
@@ -86,6 +95,8 @@ class ESKF {
         maximum_iter_ = options.max_iterations_;
         limit_ = options.epsi_;
         use_aa_ = options.use_aa_;
+
+        options_ = options;
     }
 
     /// IMU预测
@@ -131,6 +142,8 @@ class ESKF {
     /// anderson acceleration?
     bool use_aa_ = false;
     AndersonAcceleration<double, state_dim_, 10> aa_;
+
+    Options options_;
 };
 
 }  // namespace lightning

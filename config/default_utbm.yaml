@@ -36,6 +36,10 @@ fasterlio:
   kf_dis_th: 1.0
   kf_angle_th: 5.0
 
+  enable_icp_part: true
+  kalman_R: 0.1
+  min_pts: 300
+
 
 g2p5:
   esti_floor: false   # 是否动态估计地面
