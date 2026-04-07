@@ -378,6 +378,10 @@ imu和雷达外参默认为零就好，我们对这个不敏感。
 
 其他参数调整参考下一节。
 
+### 云深处四足机器人
+repo在这里：https://github.com/DeepRoboticsLab/lightning-lm-deep-robotics
+视频：【具身智能第三期 | [Lynx M20] [SLAM] M20速腾雷达使用与二次开发，以复现lightning-lm为例】https://www.bilibili.com/video/BV12YQZBqE1b?vd_source=57f46145c37bfb96f7583c9e02081590
+
 ### 对lightning-lm进行微调
 
 您可以在配置文件中对lightning进行微调，打开或者关闭一些功能。常见的配置项有：
