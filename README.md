@@ -1,5 +1,7 @@
 # Lightning-LM
 
+English | [中文](./README_CN.md)
+
 Lightning-Speed Lidar Localization and Mapping
 
 Lightning-LM is a complete laser mapping and localization module.
