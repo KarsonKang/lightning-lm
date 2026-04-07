@@ -149,9 +149,10 @@ bool PangolinWindowImpl::UpdateCurrentScan() {
 
         current_scan_ui_ = std::make_shared<ui::UiCloud>();
         current_scan_ui_->SetCloud(current_scan_, current_scan_pose_);
-        current_scan_ui_->SetRenderColor(ui::UiCloud::UseColor::CUSTOM_COLOR);
-        current_scan_ui_->SetCustomColor(Vec4f(1.0, 1.0, 1.0, 1.0));
-        current_scan_ui_->SetPointSize(2.0);
+        // current_scan_ui_->SetRenderColor(ui::UiCloud::UseColor::CUSTOM_COLOR);
+        current_scan_ui_->SetRenderColor(ui::UiCloud::UseColor::HEIGHT_COLOR);
+        // current_scan_ui_->SetCustomColor(Vec4f(1.0, 1.0, 1.0, 1.0));
+        // current_scan_ui_->SetPointSize(2.0);
 
         current_scan_need_update_.store(false);
 
@@ -228,6 +229,9 @@ void PangolinWindowImpl::DrawAll() {
         backend_car_.SetPose(newest_backend_pose_);
         backend_car_.Render();
     }
+
+    // pred_car_.SetPose(predicted_pose_);
+    // pred_car_.Render();
 
     // 关键帧
     {
@@ -340,13 +344,13 @@ void PangolinWindowImpl::CreateDisplayLayout() {
     plotter_err_->Track("$i");
 
     pangolin::View &d_plot = pangolin::Display(dis_plot_name_)
-                                  .SetBounds(0.0, 1.0, 0.75, 1.0)
-                                  .SetLayout(pangolin::LayoutEqualVertical)
-                                  .AddDisplay(*plotter_confidence_)
-                                  .AddDisplay(*plotter_err_)
-                                  .AddDisplay(*plotter_bias_acc_)
-                                  .AddDisplay(*plotter_vel_)
-                                  .AddDisplay(*plotter_vel_baselink_);
+                                 .SetBounds(0.0, 1.0, 0.75, 1.0)
+                                 .SetLayout(pangolin::LayoutEqualVertical)
+                                 .AddDisplay(*plotter_confidence_)
+                                 .AddDisplay(*plotter_err_)
+                                 .AddDisplay(*plotter_bias_acc_)
+                                 .AddDisplay(*plotter_vel_)
+                                 .AddDisplay(*plotter_vel_baselink_);
     pangolin::Display(dis_main_name_)
         .SetBounds(0.0, 1.0, pangolin::Attach::Pix(menu_width_), 1.0)
         .AddDisplay(d_cam3d)
@@ -365,7 +369,7 @@ void PangolinWindowImpl::Render() {
     pangolin::CreatePanel("menu").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(menu_width_));
     pangolin::Var<bool> menu_follow_loc("menu.Follow", false, true);                     // 跟踪实时定位
     pangolin::Var<bool> menu_draw_frontend_traj("menu.Draw Frontend Traj", true, true);  // 前端实时轨迹
-    pangolin::Var<bool> menu_draw_backend_traj("menu.Draw Backend Traj", false, true);   // 后端实时轨迹
+    pangolin::Var<bool> menu_draw_backend_traj("menu.Draw Backend Traj", true, true);    // 后端实时轨迹
     pangolin::Var<bool> menu_reset_3d_view("menu.Reset 3D View", false, false);          // 重置俯视视角
     pangolin::Var<bool> menu_reset_front_view("menu.Set to front View", false, false);   // 前视视角
     pangolin::Var<bool> menu_step("menu.Step", false, false);                            // 单步调试

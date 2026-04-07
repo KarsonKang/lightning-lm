@@ -35,10 +35,10 @@ fasterlio:
                  0, 0, 1 ]
   keep_first_imu_estimation: false
   kf_dis_th: 1.0
-  kf_angle_th: 5.0
+  kf_angle_th: 10.0
 
   enable_icp_part: false
-  plane_icp_weight: 1000.0
+  plane_icp_weight: 300.0
   min_pts: 500
   imu_filter: false
   proj_kfs: false
@@ -92,7 +92,7 @@ lidar_loc:
   lidar_loc_odom_th: 0.5
   init_with_fp: true
   min_init_confidence: 1.8
-  update_dynamic_cloud: true
+  update_dynamic_cloud: false
   update_err_h: 0.2
   update_err_v: 0.2
   update_kf_dis: 2.0
@@ -129,7 +129,7 @@ pgo:
   smooth_factor: 0.01
 roi:
   height_max: 10.0
-  height_min: -10.0
+  height_min: -0.5
   range_max: 70
   range_min: 3.0
 ui:

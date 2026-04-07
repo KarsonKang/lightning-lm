@@ -27,7 +27,7 @@ bool LaserMapping::Init(const std::string &config_yaml) {
     // esekf init
     ESKF::Options eskf_options;
     eskf_options.max_iterations_ = fasterlio::NUM_MAX_ITERATIONS;
-    eskf_options.epsi_ = 1e-3 * Eigen::Matrix<double, 23, 1>::Ones();
+    eskf_options.epsi_ = 1e-3 * Eigen::Matrix<double, ESKF::state_dim_, 1>::Ones();
     eskf_options.lidar_obs_func_ = [this](NavState &s, ESKF::CustomObservationModel &obs) { ObsModel(s, obs); };
     eskf_options.use_aa_ = use_aa_;
     kf_.Init(eskf_options);
@@ -40,8 +40,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
     int lidar_type, ivox_nearby_type;
     double gyr_cov, acc_cov, b_gyr_cov, b_acc_cov;
     double filter_size_scan;
-    Vec3d lidar_T_wrt_IMU;
-    Mat3d lidar_R_wrt_IMU;
 
     auto yaml = YAML::LoadFile(yaml_file);
     try {
@@ -60,7 +58,7 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         lidar_type = yaml["fasterlio"]["lidar_type"].as<int>();
         preprocess_->NumScans() = yaml["fasterlio"]["scan_line"].as<int>();
         preprocess_->PointFilterNum() = yaml["fasterlio"]["point_filter_num"].as<int>();
-        extrinsic_est_en_ = yaml["fasterlio"]["extrinsic_est_en"].as<bool>();
+
         extrinT_ = yaml["fasterlio"]["extrinsic_T"].as<std::vector<double>>();
         extrinR_ = yaml["fasterlio"]["extrinsic_R"].as<std::vector<double>>();
 
@@ -124,15 +122,14 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
     voxel_scan_.setLeafSize(filter_size_scan, filter_size_scan, filter_size_scan);
 
-    lidar_T_wrt_IMU = math::VecFromArray<double>(extrinT_);
-    lidar_R_wrt_IMU = math::MatFromArray<double>(extrinR_);
+    offset_t_lidar_fixed_ = math::VecFromArray<double>(extrinT_);
+    offset_R_lidar_fixed_ = math::MatFromArray<double>(extrinR_);
 
-    p_imu_->SetExtrinsic(lidar_T_wrt_IMU, lidar_R_wrt_IMU);
+    p_imu_->SetExtrinsic(offset_t_lidar_fixed_, offset_R_lidar_fixed_);
     p_imu_->SetGyrCov(Vec3d(gyr_cov, gyr_cov, gyr_cov));
     p_imu_->SetAccCov(Vec3d(acc_cov, acc_cov, acc_cov));
     p_imu_->SetGyrBiasCov(Vec3d(b_gyr_cov, b_gyr_cov, b_gyr_cov));
     p_imu_->SetAccBiasCov(Vec3d(b_acc_cov, b_acc_cov, b_acc_cov));
-
     return true;
 }
 
@@ -231,9 +228,9 @@ bool LaserMapping::Run() {
     voxel_scan_.setInputCloud(scan_undistort_);
     voxel_scan_.filter(*scan_down_body_);
 
-    if (options_.proj_kfs_) {
-        ProjectKFs();
-    }
+    // if (options_.proj_kfs_) {
+    //     ProjectKFs();
+    // }
 
     int cur_pts = scan_down_body_->size();
 
@@ -269,27 +266,30 @@ bool LaserMapping::Run() {
 
     kf_.Update(ESKF::ObsType::LIDAR, 1.0);
 
-    auto last_state = state_point_;
     state_point_ = kf_.GetX();
     state_point_.timestamp_ = measures_.lidar_end_time_;
+
+    const double delta_translation = (pred_state.pos_ - state_point_.pos_).norm();
+    const double delta_rotation_deg = (pred_state.rot_.inverse() * state_point_.rot_).log().norm() * 180.0 / M_PI;
+    const double delta_velocity = (pred_state.vel_ - state_point_.vel_).norm();
+
+    const double current_speed = state_point_.vel_.norm();
 
     LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " down " << cur_pts
               << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_surf_ << ", "
               << effect_feat_icp_;
     LOG(INFO) << "delta trans: " << (pred_state.pos_ - state_point_.pos_).transpose()
-              << ", ang: " << (pred_state.rot_.inverse() * state_point_.rot_).log().norm() * 180 / M_PI;
-    LOG(INFO) << "P diag: " << kf_.GetP().diagonal().transpose();
+              << ", ang: " << delta_rotation_deg;
+    // LOG(INFO) << "P diag: " << kf_.GetP().diagonal().transpose();
 
-    LOG(INFO) << "delta v: " << (pred_state.vel_ - state_point_.vel_).norm();
+    // Vec3d v_from_last = (state_point_.pos_ - last_state.pos_) / (state_point_.timestamp_ - last_state.timestamp_);
+    // LOG(INFO) << "v from last: " << v_from_last.transpose();
 
-    Vec3d v_from_last = (state_point_.pos_ - last_state.pos_) / (state_point_.timestamp_ - last_state.timestamp_);
-    LOG(INFO) << "v from last: " << v_from_last.transpose();
-
-    if ((pred_state.vel_ - state_point_.vel_).norm() > 1.0 || state_point_.vel_.norm() > 4.0) {
-        LOG(ERROR) << "detected very large vel change, last: " << last_state.vel_.transpose()
-                   << ", pred: " << pred_state.vel_.transpose() << ", cur:" << state_point_.vel_.transpose();
-        LOG(ERROR) << "please check";
-    }
+    // if (delta_velocity > 1.0 || current_speed > 4.0) {
+    //     LOG(ERROR) << "detected very large vel change, last: " << last_state.vel_.transpose()
+    //                << ", pred: " << pred_state.vel_.transpose() << ", cur:" << state_point_.vel_.transpose();
+    //     LOG(ERROR) << "please check";
+    // }
 
     /// keyframes
     if (last_kf_ == nullptr) {
@@ -322,28 +322,20 @@ bool LaserMapping::Run() {
         ui_->UpdateScan(scan_down_body_, state_point_.GetPose());
     }
 
-    // cv::Mat image(500, 500, CV_8UC3, cv::Scalar(0, 0, 0));
-    // cv::addText(image, cv::String(std::to_string(scan_num_)), cv::Point(20, 20), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-    // cv::Scalar(255, 255, 255));
-    // cv::imshow("wait here", image);
-    // cv::waitKey(0);
-
-    // static int scan_idx = 0;
-    LOG(INFO) << "state: " << state_point_.pos_.transpose() << ", yaw "
+    LOG(INFO) << "LIO state: " << state_point_.pos_.transpose() << ", yaw "
               << state_point_.rot_.angleZ<double>() * 180 / M_PI << ", vel: " << state_point_.vel_.transpose()
-              << " ba: " << state_point_.ba_.transpose() << ", grav: " << state_point_.grav_.vec_.transpose()
-              << ", grav norm: " << state_point_.grav_.vec_.norm();
-    // scan_idx++;
+              << ", grav: " << state_point_.grav_.transpose() << ", grav norm: " << state_point_.grav_.norm();
 
     return true;
 }
 
-void LaserMapping::ProjectKFs() {
+void LaserMapping::ProjectKFs(CloudPtr cloud, int size_limit) {
     auto state = kf_.GetX();
     SE3 pose_cur(state.rot_, state.pos_);
     pose_cur = pose_cur.inverse();
 
     for (auto kf : proj_kfs_) {
+        // LOG(INFO) << "projecting kf: " << kf->GetID();
         // if (last_kf_) {
         // auto kf = last_kf_;
         SE3 pose = pose_cur * kf->GetLIOPose();
@@ -358,10 +350,10 @@ void LaserMapping::ProjectKFs() {
             pcl_pt.z = p.z();
             pcl_pt.intensity = pt.intensity;
 
-            scan_down_body_->push_back(pcl_pt);
+            cloud->push_back(pcl_pt);
             cnt++;
 
-            if (cnt > 300) {
+            if (cnt > size_limit) {
                 break;
             }
         }
@@ -626,12 +618,12 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
         index[i] = i;
     }
 
-    LOG(INFO) << "obs from state: " << s.pos_.transpose() << ", " << s.rot_.unit_quaternion().coeffs().transpose();
+    // LOG(INFO) << "obs from state: " << s.pos_.transpose() << ", " << s.rot_.unit_quaternion().coeffs().transpose();
 
     Timer::Evaluate(
         [&, this]() {
-            Mat3f R_wl = (s.rot_ * s.offset_R_lidar_).matrix().cast<float>();
-            Vec3f t_wl = (s.rot_ * s.offset_t_lidar_ + s.pos_).cast<float>();
+            Mat3f R_wl = (s.rot_.matrix() * offset_R_lidar_fixed_).cast<float>();
+            Vec3f t_wl = (s.rot_ * offset_t_lidar_fixed_ + s.pos_).cast<float>();
 
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
                 PointType &point_body = scan_down_body_->points[i];
@@ -696,38 +688,29 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     corr_pts_.resize(effect_feat_surf_);
     corr_norm_.resize(effect_feat_surf_);
 
-    if (effect_feat_surf_ < 1 && effect_feat_icp_ < 1) {
+    if (effect_feat_surf_ < 20) {
         obs.valid_ = false;
-        LOG(WARNING) << "No enough effective points: " << effect_feat_surf_ << ", " << effect_feat_icp_;
+        LOG(WARNING) << "No enough effective surface points: " << effect_feat_surf_ << ", icp: " << effect_feat_icp_
+                     << ", required: " << 20;
         return;
     }
 
     index.resize(effect_feat_surf_);
-    const Mat3f off_R = s.offset_R_lidar_.matrix().cast<float>();
-    const Vec3f off_t = s.offset_t_lidar_.cast<float>();
+    const Mat3f off_R = offset_R_lidar_fixed_.cast<float>();
+    const Vec3f off_t = offset_t_lidar_fixed_.cast<float>();
     const Mat3f Rt = s.rot_.matrix().transpose().cast<float>();
 
     /// 点面ICP部分
     obs.HTH_.setZero();
     obs.HTr_.setZero();
 
-    std::vector<Mat12d> JTJ(effect_feat_surf_);
-    std::vector<Vec12d> JTr(effect_feat_surf_);
+    std::vector<Mat6d> JTJ(effect_feat_surf_);
+    std::vector<Vec6d> JTr(effect_feat_surf_);
 
     std::vector<double> res_sq(index.size());
 
-    auto huber_weight = [](double r, double delta = 0.1) {
-        double a = std::abs(r);
-        if (a <= delta) {
-            return 1.0;
-        } else {
-            return delta / a;
-        }
-    };
-
     std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
         Vec3f point_this_be = corr_pts_[i].head<3>();
-        Mat3f point_be_crossmat = math::SKEW_SYM_MATRIX(point_this_be);
         Vec3f point_this = off_R * point_this_be + off_t;
         Mat3f point_crossmat = math::SKEW_SYM_MATRIX(point_this);
 
@@ -738,19 +721,14 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
         Vec3f C(Rt * norm_vec);
         Vec3f A(point_crossmat * C);
 
-        Eigen::Matrix<double, 1, 12> J;
+        Eigen::Matrix<double, 1, ESKF::pose_obs_dim_> J;
         J.setZero();
-
-        if (extrinsic_est_en_) {
-            Vec3f B(point_be_crossmat * off_R.transpose() * C);
-            J << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2];
-        } else {
-            J << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        }
+        J << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2];
 
         float res = -corr_pts_[i][3];
 
-        double w = huber_weight(res);
+        // double w = huber_weight(res);
+        double w = 1.0;
 
         JTJ[i] = (J.transpose() * J).eval() * w;
         JTr[i] = J.transpose() * res * w;
@@ -763,17 +741,17 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
         obs.HTr_ += JTr[i] * options_.plane_icp_weight_;
     }
 
-    std::sort(res_sq.begin(), res_sq.end());
-    obs.lidar_residual_mean_ = res_sq[res_sq.size() / 2];
-    obs.lidar_residual_max_ = res_sq[res_sq.size() - 1];
-    LOG(INFO) << "residual mean: " << obs.lidar_residual_mean_ << ", max: " << obs.lidar_residual_max_
-              << ", 85%: " << res_sq[res_sq.size() * 0.85];
+    if (!res_sq.empty()) {
+        std::sort(res_sq.begin(), res_sq.end());
+        obs.lidar_residual_mean_ = res_sq[res_sq.size() / 2];
+        obs.lidar_residual_max_ = res_sq[res_sq.size() - 1];
+        // LOG(INFO) << "residual mean: " << obs.lidar_residual_mean_ << ", max: " << obs.lidar_residual_max_
+        //           << ", 85%: " << res_sq[res_sq.size() * 0.85];
+    }
 
     /// 点到点ICP部分
 
     if (options_.enable_icp_part_) {
-        std::vector<double> res_sq2, res_sq2_icp;
-
         JTJ.resize(cnt_pts);
         JTr.resize(cnt_pts);
 
@@ -791,15 +769,14 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             Vec3d q = scan_down_body_->points[i].getVector3fMap().cast<double>();
             Vec3d qs = scan_down_world_->points[i].getVector3fMap().cast<double>();
 
-            Eigen::Matrix<double, 3, 12> J;
+            Eigen::Matrix<double, 3, ESKF::pose_obs_dim_> J;
             J.setZero();
 
             /// translation 部分
             J.block<3, 3>(0, 0) = Mat3d::Identity();
 
             /// rotation 部分
-            SO3 R = s.rot_ * s.offset_R_lidar_;
-            J.block<3, 3>(0, 3) = -R.matrix() * SO3::hat(q);
+            J.block<3, 3>(0, 3) = -(s.rot_.matrix() * offset_R_lidar_fixed_) * SO3::hat(q);
 
             Vec3d e = qs - nearest_points_[i][0].getVector3fMap().cast<double>();
 
@@ -820,34 +797,6 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             obs.HTr_ += JTr[i] * options_.icp_weight_;
         }
     }
-
-    /// 惩罚速度项
-    // Eigen::Matrix<double, 3, 12> J;
-    // J.setZero();
-    // J.block<3, 3>(0, 0) = Mat3d::Identity();
-    // obs.HTH_
-
-    /// 填入中位数平方误差
-    // for (size_t i = 0; i < cnt_pts; ++i) {
-    //     if (point_selected_surf_[i]) {
-    //         double r = residuals_[i];
-    //         res_sq2.emplace_back(r * r);
-    //     }
-    // }
-
-    // if (!res_sq2.empty()) {
-    //     std::sort(res_sq2.begin(), res_sq2.end());
-    //     obs.lidar_residual_mean_ = res_sq2[res_sq2.size() / 2];
-    //     obs.lidar_residual_max_ = res_sq2[res_sq2.size() - 1];
-    //     LOG(INFO) << "residual mean: " << obs.lidar_residual_mean_ << ", max: " << obs.lidar_residual_max_
-    //               << ", 85%: " << res_sq2[res_sq2.size() * 0.85];
-    // }
-
-    // if (!res_sq2_icp.empty()) {
-    //     std::sort(res_sq2_icp.begin(), res_sq2_icp.end());
-    //     LOG(INFO) << "icp residual mean: " << res_sq2_icp[res_sq2_icp.size() * .5]
-    //               << ", 85%: " << res_sq2_icp[res_sq2_icp.size() * 0.85] << ", size: " << res_sq2_icp.size();
-    // }
 }
 
 ///////////////////////////  private method /////////////////////////////////////////////////////////////////////
@@ -916,6 +865,12 @@ CloudPtr LaserMapping::GetRecentCloud() {
     }
 
     return lidar_buffer_.front();
+}
+
+CloudPtr LaserMapping::GetProjCloud() {
+    auto cloud = scan_undistort_;
+    ProjectKFs(cloud);
+    return cloud;
 }
 
 }  // namespace lightning

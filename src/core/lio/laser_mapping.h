@@ -46,7 +46,7 @@ class LaserMapping {
         double kf_angle_th_ = 15 * M_PI / 180.0;
 
         bool proj_kfs_ = false;
-        int max_proj_kfs_ = 2;
+        int max_proj_kfs_ = 5;
     };
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -101,6 +101,7 @@ class LaserMapping {
     }
 
     CloudPtr GetScanUndist() const { return scan_undistort_; }
+    CloudPtr GetProjCloud();
 
     /// 获取最新的点云
     CloudPtr GetRecentCloud();
@@ -121,8 +122,8 @@ class LaserMapping {
     void ObsModel(NavState &s, ESKF::CustomObservationModel &obs);
 
     inline void PointBodyToWorld(const PointType &pi, PointType &po) {
-        Vec3d p_global(state_point_.rot_ * (state_point_.offset_R_lidar_ * pi.getVector3fMap().cast<double>() +
-                                            state_point_.offset_t_lidar_) +
+        Vec3d p_global(state_point_.rot_ *
+                           (offset_R_lidar_fixed_ * pi.getVector3fMap().cast<double>() + offset_t_lidar_fixed_) +
                        state_point_.pos_);
 
         po.x = p_global(0);
@@ -138,8 +139,8 @@ class LaserMapping {
     /// 创建关键帧
     void MakeKF();
 
-    /// 将附近的关键帧投影至scan_down_body中
-    void ProjectKFs();
+    /// 将附近的关键帧投影至cloud中
+    void ProjectKFs(CloudPtr cloud, int size_limit = 1000);
 
    private:
     Options options_;
@@ -156,6 +157,8 @@ class LaserMapping {
     /// params
     std::vector<double> extrinT_{3, 0.0};  // lidar-imu translation
     std::vector<double> extrinR_{9, 0.0};  // lidar-imu rotation
+    Mat3d offset_R_lidar_fixed_ = Mat3d::Identity();
+    Vec3d offset_t_lidar_fixed_ = Vec3d::Zero();
     std::string map_file_path_;
 
     std::vector<Keyframe::Ptr> all_keyframes_;
@@ -217,7 +220,6 @@ class LaserMapping {
 
     NavState state_point_;  // ekf current state
 
-    bool extrinsic_est_en_ = true;
     bool use_aa_ = false;  // use anderson acceleration?
 
     std::list<Keyframe::Ptr> proj_kfs_;  // 投影到当前帧的关键帧
